@@ -34,5 +34,5 @@ cmds = [
   "cd backend && pip install -r requirements.txt --break-system-packages"
 ]
 
-[start]
+[phases.start]
 cmd = "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT"
