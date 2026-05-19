@@ -1,0 +1,38 @@
+[phases.setup]
+nixPkgs = [
+  "python312",
+  "nodejs_22",
+  "chromium",
+  "nss",
+  "nspr",
+  "atk",
+  "at-spi2-atk",
+  "cups",
+  "libdrm",
+  "libxkbcommon",
+  "xorg.libX11",
+  "xorg.libXcomposite",
+  "xorg.libXdamage",
+  "xorg.libXext",
+  "xorg.libXfixes",
+  "xorg.libXrandr",
+  "mesa",
+  "pango",
+  "cairo",
+  "expat",
+  "glib",
+  "dbus",
+  "gtk3",
+  "alsa-lib"
+]
+
+[phases.build]
+cmds = [
+  "cd frontend && npm install && npm run build",
+  "cp -r frontend/dist backend/static",
+  "cd backend && pip install -r requirements.txt",
+  "cd backend && python -m playwright install chromium --with-deps"
+]
+
+[start]
+cmd = "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"

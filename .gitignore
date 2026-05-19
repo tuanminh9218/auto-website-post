@@ -1,0 +1,31 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/.env
+
+# Database (dùng file trong Railway sẽ bị reset, nên không cần push)
+backend/autoposter.db
+backend/database.db
+
+# Debug images (không cần thiết trên server)
+backend/debug_*.png
+backend/no_publish_button.png
+backend/post_success.png
+backend/debug_step*.png
+backend/debug_submit*.png
+backend/debug_inspect_form.png
+backend/debug_bottom.png
+
+# Temp files
+backend/temp_images/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
