@@ -1,6 +1,7 @@
 [phases.setup]
 nixPkgs = [
   "python312",
+  "python312Packages.pip",
   "nodejs_20",
   "chromium",
   "nss",
