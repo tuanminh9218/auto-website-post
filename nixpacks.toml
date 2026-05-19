@@ -30,7 +30,7 @@ nixPkgs = [
 cmds = [
   "cd frontend && npm install && npm run build",
   "cp -r frontend/dist backend/static",
-  "cd backend && pip install -r requirements.txt",
+  "cd backend && python -m pip install -r requirements.txt",
   "cd backend && python -m playwright install chromium --with-deps"
 ]
 
