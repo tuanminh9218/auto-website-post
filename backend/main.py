@@ -71,23 +71,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static frontend files if available (production build)
+# Static dir path (used later AFTER all API routes are registered)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-if os.path.exists(STATIC_DIR):
-    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
-    
-    @app.get("/", include_in_schema=False)
-    async def serve_frontend_root():
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
-    
-    @app.get("/{path:path}", include_in_schema=False)
-    async def serve_frontend_spa(path: str):
-        # API routes are already registered above, this catches frontend routes
-        file_path = os.path.join(STATIC_DIR, path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        # SPA fallback: return index.html for all non-API, non-file routes
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 # Global instances
 scraper = MedicalScraper()
@@ -371,9 +356,65 @@ def scrape_job(url: str, limit: int, auto_post: bool = False, start_time: Option
         
     print(f"Completed scraping {len(articles)} articles.")
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to Auto Post Manager API"}
+# ==========================================
+# SETTINGS API
+# ==========================================
+
+class SettingsData(BaseModel):
+    wp_url: Optional[str] = None
+    wp_username: Optional[str] = None
+    wp_app_password: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    watermark_text: Optional[str] = None
+
+@app.get("/api/settings")
+def get_settings():
+    """Trả về cấu hình hiện tại (không trả về password đầy đủ)."""
+    return {
+        "wp_url": os.environ.get("WP_URL", "https://mpuh.vn"),
+        "wp_username": os.environ.get("WP_USERNAME", "autoposter"),
+        "wp_app_password": "***" if os.environ.get("WP_APP_PASSWORD") else "",
+        "gemini_api_key": "***" if os.environ.get("GEMINI_API_KEY") else "",
+        "watermark_text": os.environ.get("WATERMARK_TEXT", "mpuh.vn"),
+    }
+
+@app.post("/api/settings")
+def save_settings(settings: SettingsData):
+    """Cập nhật cấu hình runtime (lưu vào os.environ và reload các services)."""
+    global browser_client, img_processor, ai_service
+
+    if settings.wp_url:
+        os.environ["WP_URL"] = settings.wp_url
+    if settings.wp_username:
+        os.environ["WP_USERNAME"] = settings.wp_username
+    if settings.wp_app_password:
+        os.environ["WP_APP_PASSWORD"] = settings.wp_app_password
+    if settings.gemini_api_key:
+        os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
+    if settings.watermark_text:
+        os.environ["WATERMARK_TEXT"] = settings.watermark_text
+
+    # Reload các service với cấu hình mới
+    new_wp_url = os.environ.get("WP_URL", "https://mpuh.vn")
+    new_wp_user = os.environ.get("WP_USERNAME", "autoposter")
+    new_wp_pass = os.environ.get("WP_APP_PASSWORD", "")
+    browser_client = BrowserPoster(
+        admin_url=f"{new_wp_url}/admin",
+        username=new_wp_user,
+        password=new_wp_pass,
+        headless=True
+    )
+
+    wm_text = os.environ.get("WATERMARK_TEXT", "mpuh.vn")
+    img_processor = ImageProcessor(watermark_text=wm_text)
+    ai_service = GeminiService()
+
+    return {"status": "success", "message": "Đã lưu cấu hình thành công!"}
+
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok", "message": "Auto Post Manager is running"}
 
 @app.get("/api/dashboard/stats")
 def get_dashboard_stats(db: Session = Depends(get_db)):
@@ -655,6 +696,39 @@ def run_source_now(source_id: int, background_tasks: BackgroundTasks, db: Sessio
         
     return {"status": "success", "message": f"Đang cào từ {source.name}..."}
 
+# ==========================================
+# SPA STATIC FILE SERVING
+# PHẢI đặt SAU TẤT CẢ API routes để tránh bị override
+# ==========================================
+if os.path.exists(STATIC_DIR):
+    # Mount /assets, /favicon.svg, /icons.svg etc. as static
+    assets_dir = os.path.join(STATIC_DIR, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon():
+        return FileResponse(os.path.join(STATIC_DIR, "favicon.svg"))
+
+    @app.get("/icons.svg", include_in_schema=False)
+    async def icons_svg():
+        return FileResponse(os.path.join(STATIC_DIR, "icons.svg"))
+
+    # SPA catch-all: chỉ xử lý các route KHÔNG phải /api/*
+    @app.get("/{path:path}", include_in_schema=False)
+    async def serve_frontend_spa(path: str):
+        # Không xử lý API routes (để FastAPI routing tự xử lý)
+        if path.startswith("api/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"API endpoint /{path} not found")
+        # Trả về file tĩnh nếu tồn tại
+        file_path = os.path.join(STATIC_DIR, path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        # SPA fallback
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
