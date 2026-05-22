@@ -422,6 +422,120 @@ def save_settings(settings: SettingsData, current_user: models.User = Depends(re
 def health_check():
     return {"status": "ok", "message": "Auto Post Manager is running"}
 
+
+# ==========================================
+# AUTH ROUTES
+# ==========================================
+
+class GoogleAuthRequest(BaseModel):
+    credential: str  # Google ID Token
+
+@app.post("/api/auth/google")
+def auth_google(body: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Xác minh Google ID Token → trả về JWT."""
+    info = verify_google_token(body.credential)
+    email = info["email"]
+    if not info.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Email chưa được xác minh bởi Google")
+
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        is_admin = (email == ADMIN_EMAIL)
+        user = models.User(
+            email=email,
+            name=info.get("name", ""),
+            avatar_url=info.get("picture", ""),
+            role="admin" if is_admin else "viewer",
+            is_active=is_admin,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Tài khoản chưa được Admin phê duyệt. Liên hệ tuanminh9218@gmail.com"
+        )
+
+    user.last_login_at = datetime.datetime.utcnow()
+    user.name = info.get("name", user.name)
+    user.avatar_url = info.get("picture", user.avatar_url)
+    db.commit()
+
+    token = create_jwt(user.email, user.role)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "email": user.email,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "role": user.role,
+        }
+    }
+
+
+@app.get("/api/auth/me")
+def auth_me(current_user: models.User = Depends(get_current_user)):
+    """Lấy thông tin user hiện tại từ JWT."""
+    return {
+        "email": current_user.email,
+        "name": current_user.name,
+        "avatar_url": current_user.avatar_url,
+        "role": current_user.role,
+    }
+
+
+# ==========================================
+# ADMIN - QUẢN LÝ TÀI KHOẢN
+# ==========================================
+
+@app.get("/api/admin/users")
+def list_users(db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+    """[Admin] Danh sách tất cả users."""
+    users = db.query(models.User).order_by(models.User.created_at.desc()).all()
+    return [{
+        "id": u.id, "email": u.email, "name": u.name,
+        "avatar_url": u.avatar_url, "role": u.role,
+        "is_active": u.is_active,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+    } for u in users]
+
+
+class UserRoleUpdate(BaseModel):
+    role: str
+    is_active: bool
+
+@app.patch("/api/admin/users/{user_id}")
+def update_user(user_id: int, body: UserRoleUpdate, db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+    """[Admin] Cập nhật role và trạng thái active."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy user")
+    if user.email == ADMIN_EMAIL:
+        raise HTTPException(status_code=400, detail="Không thể thay đổi tài khoản Admin chính")
+    if body.role not in ("admin", "editor", "viewer"):
+        raise HTTPException(status_code=400, detail="Role không hợp lệ")
+    user.role = body.role
+    user.is_active = body.is_active
+    db.commit()
+    return {"id": user.id, "email": user.email, "role": user.role, "is_active": user.is_active}
+
+
+@app.delete("/api/admin/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_admin)):
+    """[Admin] Xóa user."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy user")
+    if user.email == ADMIN_EMAIL:
+        raise HTTPException(status_code=400, detail="Không thể xóa tài khoản Admin chính")
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted"}
+
 @app.get("/api/dashboard/stats")
 def get_dashboard_stats(db: Session = Depends(get_db)):
     total_posts = db.query(models.Post).count()
