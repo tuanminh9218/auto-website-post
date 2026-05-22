@@ -707,7 +707,19 @@ def run_source_now(source_id: int, background_tasks: BackgroundTasks, db: Sessio
 # PHẢI đặt SAU TẤT CẢ API routes để tránh bị override
 # ==========================================
 if os.path.exists(STATIC_DIR):
-    # Mount /assets, /favicon.svg, /icons.svg etc. as static
+    from fastapi.responses import HTMLResponse as _HTMLResponse
+
+    def _serve_index_html():
+        """Trả về index.html với GOOGLE_CLIENT_ID được inject động."""
+        index_path = os.path.join(STATIC_DIR, "index.html")
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        inject_script = f'<script>window.__GOOGLE_CLIENT_ID__="{google_client_id}";</script>'
+        html = html.replace("<head>", f"<head>{inject_script}", 1)
+        return _HTMLResponse(content=html)
+
+    # Mount /assets
     assets_dir = os.path.join(STATIC_DIR, "assets")
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
@@ -720,34 +732,21 @@ if os.path.exists(STATIC_DIR):
     async def icons_svg():
         return FileResponse(os.path.join(STATIC_DIR, "icons.svg"))
 
-    # SPA catch-all: chỉ xử lý các route KHÔNG phải /api/*
-    @app.get("/{path:path}", include_in_schema=False)
-    async def serve_frontend_spa(path: str):
-        # Không xử lý API routes (để FastAPI routing tự xử lý)
-        if path.startswith("api/"):
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail=f"API endpoint /{path} not found")
-        # Trả về file tĩnh nếu tồn tại
-        file_path = os.path.join(STATIC_DIR, path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        # SPA fallback: Inject GOOGLE_CLIENT_ID vào index.html
-        return _serve_index_html()
-
-    def _serve_index_html():
-        """Trả về index.html với GOOGLE_CLIENT_ID được inject động."""
-        from fastapi.responses import HTMLResponse
-        index_path = os.path.join(STATIC_DIR, "index.html")
-        with open(index_path, "r", encoding="utf-8") as f:
-            html = f.read()
-        google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-        inject_script = f'<script>window.__GOOGLE_CLIENT_ID__="{google_client_id}";</script>'
-        html = html.replace("<head>", f"<head>{inject_script}", 1)
-        return HTMLResponse(content=html)
-
+    # Root route: serve injected index.html
     @app.get("/", include_in_schema=False)
     async def serve_root():
         return _serve_index_html()
+
+    # SPA catch-all: tất cả non-API routes
+    @app.get("/{path:path}", include_in_schema=False)
+    async def serve_frontend_spa(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail=f"API endpoint /{path} not found")
+        file_path = os.path.join(STATIC_DIR, path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return _serve_index_html()
+
 
 
 if __name__ == "__main__":
