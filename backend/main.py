@@ -8,7 +8,7 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -16,6 +16,16 @@ from pydantic import BaseModel
 import uvicorn
 from typing import List, Optional
 from dotenv import load_dotenv
+
+# Auth
+from auth import (
+    ADMIN_EMAIL,
+    verify_google_token,
+    create_jwt,
+    get_current_user,
+    get_current_user_optional,
+    require_admin,
+)
 
 from scraper import MedicalScraper
 from image_processor import ImageProcessor
@@ -368,8 +378,8 @@ class SettingsData(BaseModel):
     watermark_text: Optional[str] = None
 
 @app.get("/api/settings")
-def get_settings():
-    """Trả về cấu hình hiện tại (không trả về password đầy đủ)."""
+def get_settings(current_user: models.User = Depends(get_current_user)):
+    """Trả về cấu hình hiện tại (chỉ user đã login)."""
     return {
         "wp_url": os.environ.get("WP_URL", "https://mpuh.vn"),
         "wp_username": os.environ.get("WP_USERNAME", "autoposter"),
@@ -379,8 +389,8 @@ def get_settings():
     }
 
 @app.post("/api/settings")
-def save_settings(settings: SettingsData):
-    """Cập nhật cấu hình runtime (lưu vào os.environ và reload các services)."""
+def save_settings(settings: SettingsData, current_user: models.User = Depends(require_admin)):
+    """Cập nhật cấu hình runtime — chỉ Admin."""
     global browser_client, img_processor, ai_service
 
     if settings.wp_url:
@@ -394,7 +404,6 @@ def save_settings(settings: SettingsData):
     if settings.watermark_text:
         os.environ["WATERMARK_TEXT"] = settings.watermark_text
 
-    # Reload các service với cấu hình mới
     new_wp_url = os.environ.get("WP_URL", "https://mpuh.vn")
     new_wp_user = os.environ.get("WP_USERNAME", "autoposter")
     new_wp_pass = os.environ.get("WP_APP_PASSWORD", "")
@@ -404,11 +413,8 @@ def save_settings(settings: SettingsData):
         password=new_wp_pass,
         headless=True
     )
-
-    wm_text = os.environ.get("WATERMARK_TEXT", "mpuh.vn")
-    img_processor = ImageProcessor(watermark_text=wm_text)
+    img_processor = ImageProcessor(watermark_text=os.environ.get("WATERMARK_TEXT", "mpuh.vn"))
     ai_service = GeminiService()
-
     return {"status": "success", "message": "Đã lưu cấu hình thành công!"}
 
 

@@ -9,3 +9,10 @@ python-dotenv
 playwright
 sqlalchemy
 lxml
+# Auth & DB
+google-auth
+google-auth-httplib2
+python-jose[cryptography]
+psycopg2-binary
+cloud-sql-python-connector[pg8000]
+pg8000
