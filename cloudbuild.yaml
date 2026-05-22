@@ -1,0 +1,52 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/auto-post-repo/auto-website-post:$COMMIT_SHA'
+      - '-t'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/auto-post-repo/auto-website-post:latest'
+      - '.'
+    timeout: '1200s'
+
+  # Push the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/auto-post-repo/auto-website-post'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'auto-website-post'
+      - '--image'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/auto-post-repo/auto-website-post:$COMMIT_SHA'
+      - '--region'
+      - '$_REGION'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '300'
+      - '--max-instances'
+      - '3'
+
+images:
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/auto-post-repo/auto-website-post:$COMMIT_SHA'
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/auto-post-repo/auto-website-post:latest'
+
+substitutions:
+  _REGION: asia-southeast1
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
