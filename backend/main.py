@@ -731,8 +731,23 @@ if os.path.exists(STATIC_DIR):
         file_path = os.path.join(STATIC_DIR, path)
         if os.path.isfile(file_path):
             return FileResponse(file_path)
-        # SPA fallback
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+        # SPA fallback: Inject GOOGLE_CLIENT_ID vào index.html
+        return _serve_index_html()
+
+    def _serve_index_html():
+        """Trả về index.html với GOOGLE_CLIENT_ID được inject động."""
+        from fastapi.responses import HTMLResponse
+        index_path = os.path.join(STATIC_DIR, "index.html")
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        inject_script = f'<script>window.__GOOGLE_CLIENT_ID__="{google_client_id}";</script>'
+        html = html.replace("<head>", f"<head>{inject_script}", 1)
+        return HTMLResponse(content=html)
+
+    @app.get("/", include_in_schema=False)
+    async def serve_root():
+        return _serve_index_html()
 
 
 if __name__ == "__main__":
