@@ -193,6 +193,7 @@ class PostUpdate(BaseModel):
     content: str
     location: str
     scheduled_time: Optional[str] = None
+    excerpt: Optional[str] = None
 
 class PostResponse(BaseModel):
     id: int
@@ -273,24 +274,16 @@ def process_and_post_article(article_url: str, db: Session, auto_post: bool = Fa
     _source_name = get_source_name(article_url)
     
     # Gói nội dung vào thẻ div 50%, căn giữa, dàn đều và có style cho ảnh
-    post_content = f"""
-<div style="width: 50%; min-width: 320px; margin: 0 auto; text-align: justify;" class="auto-article-container">
-    <style>
-        .auto-article-container img {{
-            max-width: 100% !important;
-            height: auto !important;
-            display: block;
-            margin: 10px auto;
-        }}
-        .auto-article-container figure {{
-            max-width: 100% !important;
-            margin: 10px auto;
-        }}
-    </style>
-    {rewritten_content}
-    <p style="text-align: right; margin-top: 5px;"><em>Nguồn tham khảo: <a href='{article_url}' target='_blank'>{_source_name}</a></em></p>
-</div>
-"""
+    post_content = (
+        '<div style="width: 50%; min-width: 320px; margin: 0 auto; text-align: justify;" class="auto-article-container">\n'
+        '<style>\n'
+        '.auto-article-container img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; }\n'
+        '.auto-article-container figure { max-width: 100% !important; margin: 10px auto; }\n'
+        '</style>\n'
+        + rewritten_content.strip() + '\n'
+        + f'<p style="text-align: right; margin-top: 5px;"><em>Nguồn tham khảo: <a href="{article_url}" target="_blank">{_source_name}</a></em></p>\n'
+        + '</div>\n'
+    )
 
     # Tính toán schedule_time nếu có
     final_schedule_time = None
@@ -601,15 +594,14 @@ def update_post(post_id: int, post_update: PostUpdate, db: Session = Depends(get
     post.title = post_update.title
     post.content = post_update.content
     post.location = post_update.location
+    if post_update.excerpt is not None:
+        post.short_desc = post_update.excerpt
     if post_update.scheduled_time:
-        import datetime
         post.scheduled_time = datetime.datetime.fromisoformat(post_update.scheduled_time.replace('Z', ''))
     else:
         post.scheduled_time = None
         
-    import datetime
     post.updated_at = datetime.datetime.utcnow()
-        
     db.commit()
     
     # Nếu bài đã đăng, thì gọi script sửa bài trên WordPress
@@ -618,7 +610,8 @@ def update_post(post_id: int, post_update: PostUpdate, db: Session = Depends(get
         success = browser_client.update_post(
             title=post.title,
             new_content=post.content,
-            location=post.location or "Tin tức sự kiện"
+            location=post.location or "Tin tức sự kiện",
+            excerpt=post.short_desc or None,
         )
         if success:
             print("Cập nhật trên website thành công!")
@@ -626,6 +619,7 @@ def update_post(post_id: int, post_update: PostUpdate, db: Session = Depends(get
             print("Cập nhật trên website thất bại!")
             
     return {"status": "success"}
+
 
 @app.delete("/api/posts/{post_id}")
 def delete_post(post_id: int, db: Session = Depends(get_db)):

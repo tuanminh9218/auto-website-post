@@ -71,7 +71,29 @@ class BrowserPoster:
         print("CẢNH BÁO: Không thể inject nội dung vào editor!")
         return False
 
-    def create_post(self, title: str, content: str, image_path: str = None, location: str = "Tin tức sự kiện") -> bool:
+    def _generate_excerpt(self, content: str, max_chars: int = 200) -> str:
+        """Tạo mô tả ngắn từ HTML content.
+        Xóa thẻ <style>, <script>, sau đó strip các thẻ HTML khác.
+        """
+        # 1. Xóa toàn bộ khối <style>...</style>
+        text = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
+        # 2. Xóa toàn bộ khối <script>...</script>
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # 3. Xóa tất cả thẻ HTML còn lại
+        text = re.sub(r'<[^>]+>', ' ', text)
+        # 4. Xóa khoảng trắng thừa
+        text = re.sub(r'\s+', ' ', text).strip()
+        # 5. Bỏ phần "Nguồn tham khảo:" ở cuối nếu có
+        for marker in ['Nguồn tham khảo:', 'Nguồn:', 'Tham khảo:']:
+            idx = text.find(marker)
+            if idx != -1:
+                text = text[:idx].strip()
+        if len(text) > max_chars:
+            # Cắt tại ranh giới từ
+            text = text[:max_chars].rsplit(' ', 1)[0] + '...'
+        return text
+
+    def create_post(self, title: str, content: str, image_path: str = None, location: str = "Tin tức sự kiện", excerpt: str = None) -> bool:
         """
         Tự động đăng bài lên mpuh.vn/admin thông qua trình duyệt ảo (Playwright).
         Trả về True nếu bài đăng thành công (xác nhận qua URL redirect).
@@ -216,9 +238,18 @@ class BrowserPoster:
                 time.sleep(0.5)
 
                 # --- Điền Mô tả ngắn ---
-                clean_text = re.sub('<[^<]+>', '', content)[:200] + "..."
-                # Tìm textarea có placeholder/name liên quan đến mô tả, hoặc thẻ đi sau label "Mô tả ngắn (*)"
-                short_desc = page.locator('textarea[placeholder*="mô tả"], textarea[placeholder*="Mô tả"], textarea[name*="short"], textarea[name*="tom_tat"], textarea[name*="description"], label:has-text("Mô tả ngắn") + * textarea, label:has-text("Mô tả ngắn") ~ textarea')
+                # Sử dụng excerpt được truyền vào, hoặc tự tạo từ content
+                clean_text = excerpt if excerpt else self._generate_excerpt(content)
+                # Tìm textarea mô tả ngắn trên website
+                short_desc = page.locator(
+                    'textarea[placeholder*="mô tả"], textarea[placeholder*="Mô tả"], '
+                    'textarea[name*="short"], textarea[name*="tom_tat"], '
+                    'textarea[name*="description"], '
+                    'label:has-text("Ố mô tả ngắn") + * textarea, '
+                    'label:has-text("Ố mô tả ngắn") ~ textarea, '
+                    'label:has-text("Mô tả ngắn") + * textarea, '
+                    'label:has-text("Mô tả ngắn") ~ textarea'
+                )
                 if short_desc.count() > 0:
                     short_desc.first.fill(clean_text)
                     print("  → Đã điền mô tả ngắn.")
@@ -357,7 +388,7 @@ class BrowserPoster:
             print(f"LỖI: {str(e).encode('utf-8', 'replace').decode('utf-8')}")
             return False
 
-    def update_post(self, title: str, new_content: str, location: str = "Tin tức sự kiện") -> bool:
+    def update_post(self, title: str, new_content: str, location: str = "Tin tức sự kiện", excerpt: str = None) -> bool:
         """
         Tìm bài viết theo tiêu đề và cập nhật nội dung trên mpuh.vn/admin.
         """
@@ -443,8 +474,14 @@ class BrowserPoster:
                     pass
 
                 # Điền lại mô tả ngắn
-                clean_text = re.sub('<[^<]+>', '', new_content)[:200] + "..."
-                short_desc = page.locator('textarea[placeholder*="mô tả"], textarea[placeholder*="Mô tả"], textarea[name*="short"], textarea[name*="tom_tat"], textarea[name*="description"], label:has-text("Mô tả ngắn") + * textarea, label:has-text("Mô tả ngắn") ~ textarea')
+                clean_text = excerpt if excerpt else self._generate_excerpt(new_content)
+                short_desc = page.locator(
+                    'textarea[placeholder*="mô tả"], textarea[placeholder*="Mô tả"], '
+                    'textarea[name*="short"], textarea[name*="tom_tat"], '
+                    'textarea[name*="description"], '
+                    'label:has-text("Mô tả ngắn") + * textarea, '
+                    'label:has-text("Mô tả ngắn") ~ textarea'
+                )
                 if short_desc.count() > 0:
                     short_desc.first.fill(clean_text)
 

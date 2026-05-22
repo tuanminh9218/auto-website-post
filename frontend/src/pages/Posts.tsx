@@ -72,6 +72,7 @@ export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
   const [contentViewMode, setContentViewMode] = useState<'html' | 'preview'>('html');
   const [liveContent, setLiveContent] = useState('');
+  const [liveExcerpt, setLiveExcerpt] = useState('');
   const { showToast } = useToast();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -85,13 +86,50 @@ export default function Posts() {
     }
   };
 
+  // Tự động đăng các bài đã quá hạn lịch hẹn
+  const checkAndPublishOverdue = async (currentPosts: any[]) => {
+    const now = new Date();
+    const overdue = currentPosts.filter(
+      (p) => p.status === 'pending' && p.scheduled_time && new Date(p.scheduled_time) <= now
+    );
+    for (const post of overdue) {
+      showToast(`⏰ Bài "${post.title.substring(0, 30)}..." đã đến giờ hẹn — đang tự động đăng...`, 'info');
+      setPosts(prev => prev.map(p => p.id === post.id ? { ...p, status: 'publishing' } : p));
+      try {
+        await fetch(`/api/posts/${post.id}/publish`, { method: 'POST' });
+        showToast(`✅ Đăng tự động thành công: "${post.title.substring(0, 30)}..."`, 'success');
+      } catch {
+        showToast(`❌ Lỗi khi tự động đăng bài ID ${post.id}`, 'error');
+      }
+    }
+    if (overdue.length > 0) fetchPosts();
+  };
+
   useEffect(() => {
     fetchPosts();
   }, []);
 
+  // Kiểm tra mọi 60 giây
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const res = await fetch('/api/posts').catch(() => null);
+      if (!res) return;
+      const data = await res.json().catch(() => []);
+      setPosts(data);
+      checkAndPublishOverdue(data);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Kiểm tra ngay lần đầu khi load xong
+  useEffect(() => {
+    if (posts.length > 0) checkAndPublishOverdue(posts);
+  }, [posts.length > 0 ? posts[0]?.id : null]);
+
   const handleEditClick = (post: any) => {
     setEditingPost(post);
     setLiveContent(post.content || '');
+    setLiveExcerpt(post.short_desc || '');
     setContentViewMode('html');
     setShowEditModal(true);
   };
@@ -139,15 +177,15 @@ export default function Posts() {
       const title = (document.getElementById('edit_title') as HTMLInputElement).value;
       const location = (document.getElementById('edit_location') as HTMLSelectElement).value;
       const scheduledTime = (document.getElementById('edit_time') as HTMLInputElement).value;
-      // Lấy nội dung từ state (đã được đồng bộ realtime từ textarea)
       const content = liveContent;
+      const excerpt = liveExcerpt;
       
       setIsSavingEdit(true);
       try {
           const res = await fetch(`/api/posts/${editingPost.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ title, location, scheduled_time: scheduledTime || null, content })
+              body: JSON.stringify({ title, location, scheduled_time: scheduledTime || null, content, excerpt })
           });
           if (res.ok) {
               showToast('Lưu thay đổi thành công!', 'success');
@@ -430,6 +468,24 @@ export default function Posts() {
                   defaultValue={editingPost.scheduled_time ? editingPost.scheduled_time.substring(0,16) : ''} 
                 />
               </div>
+            </div>
+
+            {/* Mô tả ngắn */}
+            <div className="form-group">
+              <label className="form-label">
+                Mô tả ngắn
+                <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                  (hiển thị khi chia sẻ mạng xã hội và kết quả tìm kiếm)
+                </span>
+              </label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                placeholder="Nhập mô tả ngắn tóm tắt nội dung bài viết..."
+                value={liveExcerpt}
+                onChange={(e) => setLiveExcerpt(e.target.value)}
+                style={{ resize: 'vertical', minHeight: '80px' }}
+              />
             </div>
 
             <div className="form-group">
